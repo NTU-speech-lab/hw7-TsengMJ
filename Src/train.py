@@ -38,72 +38,76 @@ class StudentNet(nn.Module):
                 nn.MaxPool2d(2, 2, 0),
             ),
 
-            nn.Sequential(
-                # Pointwise Convolution
-                nn.Conv2d(bandwidth[0], bandwidth[0], 1),
-                # Depthwise Convolution
+            nn.Sequential( # 16*9 + 16*32 + 32*9 + 32*32
                 nn.Conv2d(bandwidth[0], bandwidth[0], 3, 1, 1, groups=bandwidth[0]),
-                # Batch Normalization
                 nn.BatchNorm2d(bandwidth[0]),
+                nn.ReLU6(),
+                nn.Conv2d(bandwidth[0], bandwidth[1], 1),
+                # Depthwise Convolution
+                nn.Conv2d(bandwidth[1], bandwidth[1], 3, 1, 1, groups=bandwidth[0]),
+                # Batch Normalization
+                nn.BatchNorm2d(bandwidth[1]),
                 # ReLU6 是限制Neuron最小只會到0，最大只會到6。 MobileNet系列都是使用ReLU6。
                 # 使用ReLU6的原因是因為如果數字太大，會不好壓到float16 / or further qunatization，因此才給個限制。
                 nn.ReLU6(),
                 # Pointwise Convolution
-                nn.Conv2d(bandwidth[0], bandwidth[1], 1),
+                nn.Conv2d(bandwidth[1], bandwidth[1], 1),
                 # 過完Pointwise Convolution不需要再做ReLU，經驗上Pointwise + ReLU效果都會變差。
                 nn.MaxPool2d(2, 2, 0),
                 # 每過完一個Block就Down Sampling
             ),
 
-            nn.Sequential(
-                nn.Conv2d(bandwidth[1], bandwidth[1], 1),
+            nn.Sequential( # 32*9 + 32*64 + 64*9 + 64*64
                 nn.Conv2d(bandwidth[1], bandwidth[1], 3, 1, 1, groups=bandwidth[1]),
                 nn.BatchNorm2d(bandwidth[1]),
                 nn.ReLU6(),
                 nn.Conv2d(bandwidth[1], bandwidth[2], 1),
+                nn.Conv2d(bandwidth[2], bandwidth[2], 3, 1, 1, groups=bandwidth[1]),
+                nn.BatchNorm2d(bandwidth[2]),
+                nn.ReLU6(),
+                nn.Conv2d(bandwidth[2], bandwidth[2], 1),
                 nn.MaxPool2d(2, 2, 0),
             ),
 
-            nn.Sequential(
-                nn.Conv2d(bandwidth[2], bandwidth[2], 1),
+            nn.Sequential( # 64*9 + 64*128 + 128*9 + 128*128
                 nn.Conv2d(bandwidth[2], bandwidth[2], 3, 1, 1, groups=bandwidth[2]),
                 nn.BatchNorm2d(bandwidth[2]),
                 nn.ReLU6(),
                 nn.Conv2d(bandwidth[2], bandwidth[3], 1),
+                nn.Conv2d(bandwidth[3], bandwidth[3], 3, 1, 1, groups=bandwidth[2]),
+                nn.BatchNorm2d(bandwidth[3]),
+                nn.ReLU6(),
+                nn.Conv2d(bandwidth[3], bandwidth[3], 1),
                 nn.MaxPool2d(2, 2, 0),
             ),
 
             # 到這邊為止因為圖片已經被Down Sample很多次了，所以就不做MaxPool
-            nn.Sequential(
-                nn.Conv2d(bandwidth[3], bandwidth[3], 1, groups=bandwidth[3]//4),
+            nn.Sequential( # 128*9 + (128*256) 8*16*16
                 nn.Conv2d(bandwidth[3], bandwidth[3], 3, 1, 1, groups=bandwidth[3]),
                 nn.BatchNorm2d(bandwidth[3]),
                 nn.ReLU6(),
-                nn.Conv2d(bandwidth[3], bandwidth[4], 1, groups=bandwidth[3]//4),
+                nn.Conv2d(bandwidth[3], bandwidth[4], 1, groups=bandwidth[3]//8),
             ),
 
-            nn.Sequential(
-                nn.Conv2d(bandwidth[4], bandwidth[4], 1, groups=bandwidth[4]//16),
+            nn.Sequential( # 256*9 + 256*256 // 8*8*32 // 16*16*16
                 nn.Conv2d(bandwidth[4], bandwidth[4], 3, 1, 1, groups=bandwidth[4]),
                 nn.BatchNorm2d(bandwidth[4]),
                 nn.ReLU6(),
                 nn.Conv2d(bandwidth[4], bandwidth[5], 1, groups=bandwidth[4]//16),
             ),
 
-            nn.Sequential(
-                nn.Conv2d(bandwidth[5], bandwidth[5], 1, groups=bandwidth[4]//16),
+            nn.Sequential( # 256*9 + 256*256 // 8*8*32 // 16*16*16
                 nn.Conv2d(bandwidth[5], bandwidth[5], 3, 1, 1, groups=bandwidth[5]),
                 nn.BatchNorm2d(bandwidth[5]),
                 nn.ReLU6(),
                 nn.Conv2d(bandwidth[5], bandwidth[6], 1, groups=bandwidth[4]//16),
             ),
 
-            nn.Sequential(
-                nn.Conv2d(bandwidth[6], bandwidth[6], 1, groups=bandwidth[4]//32),
+            nn.Sequential( # 256*9 + 256*256 // 8*8*32 // 16*16*16
                 nn.Conv2d(bandwidth[6], bandwidth[6], 3, 1, 1, groups=bandwidth[6]),
                 nn.BatchNorm2d(bandwidth[6]),
                 nn.ReLU6(),
-                nn.Conv2d(bandwidth[6], bandwidth[7], 1, groups=bandwidth[4]//32),
+                nn.Conv2d(bandwidth[6], bandwidth[7], 1, groups=bandwidth[4]//16),
             ),
 
             # 這邊我們採用Global Average Pooling。
@@ -119,7 +123,6 @@ class StudentNet(nn.Module):
         out = self.cnn(x)
         out = out.view(out.size()[0], -1)
         return self.fc(out)
-
 
 def loss_fn_kd(outputs, labels, teacher_outputs, T=20, alpha=0.5):
     # 一般的Cross Entropy
@@ -187,6 +190,11 @@ print('Load data...')
 workspace_dir = sys.argv[1]
 train_x, train_y = readfile(os.path.join(workspace_dir, "training"), True)
 val_x, val_y = readfile(os.path.join(workspace_dir, "validation"), True)
+#train_val_x = np.concatenate((train_x, val_x), axis=0)
+#train_val_y = np.concatenate((train_y, val_y), axis=0)
+
+#train_val_set = MyDataset(train_val_x, train_val_y, trainTransform)
+#train_val_loader = DataLoader(train_val_set, batch_size=32, shuffle=True)
 
 train_set = MyDataset(train_x, train_y, trainTransform)
 val_set = MyDataset(val_x, val_y, testTransform)
@@ -196,16 +204,16 @@ valid_dataloader = DataLoader(val_set, batch_size=32, shuffle=False)
 
 print('Load teacher model')
 student_net = StudentNet(base=16).cuda()
-student_net.load_state_dict(torch.load('./student_model_11.bin'))
 teacher_net = models.resnet18(pretrained=False, num_classes=11).cuda()
 
 teacher_net.load_state_dict(torch.load(f'./teacher_resnet18.bin'))
-optimizer = optim.SGD(student_net.parameters(), lr=0.005, momentum=0.9)
+
+adam = optim.Adam(student_net.parameters(), lr=0.01)
+sgdm = optim.SGD(student_net.parameters(), lr=0.005, momentum=0.9)
 
 def run_epoch(dataloader, update=True, alpha=0.5, epoch=0):
     total_num, total_hit, total_loss = 0, 0, 0
     for now_step, batch_data in enumerate(dataloader):
-        optimizer.zero_grad()
 
         inputs, hard_labels = batch_data
         inputs = inputs.cuda()
@@ -216,12 +224,16 @@ def run_epoch(dataloader, update=True, alpha=0.5, epoch=0):
 
         if update:
             logits = student_net(inputs)
-            if epoch < 600:
-                loss = loss_fn_kd(logits, hard_labels, soft_labels, 20, alpha)
+            if epoch < 300:
+                loss = loss_fn_kd(logits, hard_labels, soft_labels, 20, 0.5)
+                adam.zero_grad()
+                loss.backward()
+                adam.step()
             else:
                 loss = loss_fn_kd(logits, hard_labels, soft_labels, 20, 0)
-            loss.backward()
-            optimizer.step()    
+                sgdm.zero_grad()
+                loss.backward()
+                sgdm.step()    
         else:
             with torch.no_grad():
                 logits = student_net(inputs)
@@ -237,16 +249,15 @@ print('Start training...')
 # TeacherNet永遠都是Eval mode.
 teacher_net.eval()
 now_best_acc = 0
-for i in range(600):
+for epoch in range(200):
     student_net.train()
-    train_loss, train_acc = run_epoch(train_dataloader, update=True, epoch=600)
+    #train_loss, train_acc = run_epoch(train_val_loader, update=True, epoch=epoch)
+    train_loss, train_acc = run_epoch(train_dataloader, update=True, epoch=epoch)
     student_net.eval()
-    valid_loss, valid_acc = run_epoch(valid_dataloader, update=False, epoch=600)
+    valid_loss, valid_acc = run_epoch(valid_dataloader, update=False, epoch=epoch)
 
     # 存下最好的model。
     if valid_acc > now_best_acc:
         now_best_acc = valid_acc
         torch.save(student_net.state_dict(), 'student_model.bin')
-    print('epoch {:>3d}: train loss: {:6.4f}, acc {:6.4f} valid loss: {:6.4f}, acc {:6.4f}'.format(
-        i, train_loss, train_acc, valid_loss, valid_acc))
-print('Train end.')
+    print('epoch {:>3d}: train loss: {:6.4f}, acc {:6.4f}, valid loss: {:6.4f}, acc {:6.4f}'.format(epoch, train_loss, train_acc, valid_loss, valid_acc))
