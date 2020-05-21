@@ -190,11 +190,6 @@ print('Load data...')
 workspace_dir = sys.argv[1]
 train_x, train_y = readfile(os.path.join(workspace_dir, "training"), True)
 val_x, val_y = readfile(os.path.join(workspace_dir, "validation"), True)
-#train_val_x = np.concatenate((train_x, val_x), axis=0)
-#train_val_y = np.concatenate((train_y, val_y), axis=0)
-
-#train_val_set = MyDataset(train_val_x, train_val_y, trainTransform)
-#train_val_loader = DataLoader(train_val_set, batch_size=32, shuffle=True)
 
 train_set = MyDataset(train_x, train_y, trainTransform)
 val_set = MyDataset(val_x, val_y, testTransform)
@@ -208,7 +203,6 @@ teacher_net = models.resnet18(pretrained=False, num_classes=11).cuda()
 
 teacher_net.load_state_dict(torch.load(f'./teacher_resnet18.bin'))
 
-adam = optim.Adam(student_net.parameters(), lr=0.01)
 sgdm = optim.SGD(student_net.parameters(), lr=0.005, momentum=0.9)
 
 def run_epoch(dataloader, update=True, alpha=0.5, epoch=0):
@@ -224,16 +218,11 @@ def run_epoch(dataloader, update=True, alpha=0.5, epoch=0):
 
         if update:
             logits = student_net(inputs)
-            if epoch < 300:
-                loss = loss_fn_kd(logits, hard_labels, soft_labels, 20, 0.5)
-                adam.zero_grad()
-                loss.backward()
-                adam.step()
-            else:
-                loss = loss_fn_kd(logits, hard_labels, soft_labels, 20, 0)
-                sgdm.zero_grad()
-                loss.backward()
-                sgdm.step()    
+            loss = loss_fn_kd(logits, hard_labels, soft_labels, 20, alpha)
+            sgdm.zero_grad()
+            loss.backward()
+            sgdm.step()
+            
         else:
             with torch.no_grad():
                 logits = student_net(inputs)
@@ -251,7 +240,6 @@ teacher_net.eval()
 now_best_acc = 0
 for epoch in range(200):
     student_net.train()
-    #train_loss, train_acc = run_epoch(train_val_loader, update=True, epoch=epoch)
     train_loss, train_acc = run_epoch(train_dataloader, update=True, epoch=epoch)
     student_net.eval()
     valid_loss, valid_acc = run_epoch(valid_dataloader, update=False, epoch=epoch)
